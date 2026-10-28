@@ -19,4 +19,4 @@ Artisan::command('notifications:dispatch', function (NotificationService $servic
     $this->info("Queued {$count} notifications.");
 })->purpose('Queue the notifications that were saved but could not be queued');
 
-Schedule::command('notifications:dispatch')->everyMinute();
+Schedule::command('notifications:dispatch')->everyMinute()->withoutOverlapping();
