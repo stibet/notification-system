@@ -36,7 +36,7 @@ php artisan schedule:work
 
 - `POST /api/notifications` validates the request, saves it with status `queued` and dispatches a `SendNotification` job. The response is `202`.
 - The priority is used as the queue name. Workers run with `--queue=high,normal,low`, so high priority jobs are processed first.
-- The job allows 100 sends per second per channel. Before sending it increments a counter in Redis (`INCR`, atomic) and checks it after, so workers running at the same time can't go over the limit together. Jobs over the limit go back to the queue for a second.
+- The job allows 100 sends per second per channel. Before sending it increments a counter in Redis (`INCR`, atomic) and checks it after, so even with several workers at most 100 pass in each one-second window. Jobs over the limit go back to the queue for a second.
 - The worker posts `{"to", "channel", "content"}` to the provider.
 
 Delivery and retries:
@@ -46,7 +46,9 @@ Delivery and retries:
 - Other 4xx: status `failed`, no retry.
 - After 5 failed attempts the status is `failed` and the last error is saved.
 
-To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the queue gives the job back after 90 seconds (`retry_after`). The job times out after 30 seconds, so a row that has been in `processing` for more than a minute is taken again. A job that finds its row in `processing` goes back to the queue and checks again a minute later, so a row is never left there.
+To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If two workers pick up the same notification at the same time, only one of them gets the row. If a worker dies while sending, the queue gives the job back after 90 seconds (`retry_after`). The job times out after 30 seconds, so a row that has been in `processing` for more than a minute is taken again. A job that finds its row in `processing` goes back to the queue and checks again a minute later, so a row doesn't stay there.
+
+Delivery is at least once, not exactly once: if a worker dies after the provider accepted the message but before the status was saved, the message is sent again. The notification id is sent in the `Idempotency-Key` header so the provider can drop the second one.
 
 The notification is saved before its job is put on the queue. If Redis is down at that moment the API still answers `202`, and the row keeps `dispatched_at` empty. The scheduler runs `notifications:dispatch` every minute and queues these rows (a simple outbox).
 

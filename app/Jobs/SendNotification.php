@@ -84,7 +84,7 @@ class SendNotification implements ShouldQueue
     }
 
     // The counter is increased before it is checked (INCR in Redis), so workers
-    // running at the same time can't go over the limit together.
+    // running at the same time can't both take the last slot.
     private function overRateLimit(): bool
     {
         $key = 'notifications:'.$this->channel;
@@ -98,7 +98,7 @@ class SendNotification implements ShouldQueue
         return true;
     }
 
-    // Only one worker can move the row to "processing", so it is never sent twice.
+    // Only one worker can move the row to "processing", so two workers can't send it at the same time.
     // If a worker crashes, the queue gives the job back after 90 seconds (retry_after).
     // The job times out after 30 seconds, so a row in "processing" for a minute is taken again.
     private function claim(): bool

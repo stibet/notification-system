@@ -121,7 +121,7 @@ class SendNotificationTest extends TestCase
         $this->runJob($notification)->assertReleased(10);
     }
 
-    public function test_a_notification_is_never_sent_twice(): void
+    public function test_running_the_job_again_does_not_send_again(): void
     {
         $this->providerAccepts();
         $notification = Notification::factory()->create();
