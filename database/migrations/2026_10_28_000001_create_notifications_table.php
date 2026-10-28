@@ -23,6 +23,7 @@ return new class extends Migration
             $table->string('provider_message_id')->nullable();
             $table->unsignedInteger('latency_ms')->nullable();
             $table->timestamp('scheduled_at', 3)->nullable();
+            $table->timestamp('dispatched_at', 3)->nullable()->index();
             $table->timestamp('sent_at', 3)->nullable();
             $table->timestamps(3);
 

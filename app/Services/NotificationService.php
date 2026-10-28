@@ -6,8 +6,11 @@ use App\Enums\NotificationStatus;
 use App\Jobs\SendNotification;
 use App\Models\Notification;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class NotificationService
 {
@@ -47,13 +50,27 @@ class NotificationService
         });
 
         // dispatch after commit
-        foreach ($created as $notification) {
+        try {
+            $this->dispatch($created);
+        } catch (Throwable $e) {
+            // they are saved, notifications:dispatch will queue them later
+            Log::error('Could not queue notifications', ['error' => $e->getMessage()]);
+        }
+
+        return [$created, $existing];
+    }
+
+    // dispatched_at stays empty until the jobs are on the queue. If the queue is
+    // down, notifications:dispatch (every minute) finds these rows and queues them.
+    public function dispatch(Collection $notifications): void
+    {
+        foreach ($notifications as $notification) {
             SendNotification::dispatch($notification->id, $notification->channel->value)
                 ->onQueue($notification->priority->value)
                 ->delay($notification->scheduled_at);
         }
 
-        return [$created, $existing];
+        Notification::whereIn('id', $notifications->pluck('id'))->update(['dispatched_at' => now()]);
     }
 
     public function cancel(Notification $notification): bool

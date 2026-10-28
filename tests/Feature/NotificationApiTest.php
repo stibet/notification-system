@@ -7,6 +7,7 @@ use App\Jobs\SendNotification;
 use App\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use RuntimeException;
 use Tests\TestCase;
 
 class NotificationApiTest extends TestCase
@@ -169,6 +170,28 @@ class NotificationApiTest extends TestCase
 
         $this->postJson("/api/notifications/{$notification->id}/cancel")->assertStatus(409);
         $this->assertSame(NotificationStatus::Sent, $notification->refresh()->status);
+    }
+
+    public function test_the_notification_is_saved_when_the_queue_is_down(): void
+    {
+        Queue::shouldReceive('connection')->andThrow(new RuntimeException('Connection refused'));
+
+        $this->postJson('/api/notifications', $this->sms)->assertStatus(202);
+
+        $this->assertNull(Notification::first()->dispatched_at);
+    }
+
+    public function test_notifications_that_were_not_queued_are_queued_later(): void
+    {
+        $waiting = Notification::factory()->create();
+        $queued = Notification::factory()->create(['dispatched_at' => now()]);
+        $this->travel(2)->minutes();
+
+        $this->artisan('notifications:dispatch')->expectsOutput('Queued 1 notifications.');
+
+        Queue::assertPushed(SendNotification::class, 1);
+        Queue::assertPushed(fn (SendNotification $job) => $job->notificationId === $waiting->id);
+        $this->assertNotNull($waiting->refresh()->dispatched_at);
     }
 
     public function test_responses_have_a_correlation_id(): void

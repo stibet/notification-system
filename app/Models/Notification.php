@@ -30,14 +30,19 @@ class Notification extends Model
         'provider_message_id',
         'latency_ms',
         'scheduled_at',
+        'dispatched_at',
         'sent_at',
     ];
+
+    // internal, see NotificationService::dispatch()
+    protected $hidden = ['dispatched_at'];
 
     protected $casts = [
         'channel' => Channel::class,
         'priority' => Priority::class,
         'status' => NotificationStatus::class,
         'scheduled_at' => 'datetime',
+        'dispatched_at' => 'datetime',
         'sent_at' => 'datetime',
     ];
 }

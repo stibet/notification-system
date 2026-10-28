@@ -22,6 +22,14 @@ services:
     depends_on:
       - app
 
+  scheduler:
+    build: .
+    env_file: .env.docker
+    command: php artisan schedule:work
+    restart: unless-stopped
+    depends_on:
+      - app
+
   postgres:
     image: postgres:16-alpine
     environment:
