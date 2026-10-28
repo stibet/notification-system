@@ -59,7 +59,7 @@ Other details:
   - sms: phone number like `+905551234567`, max 160 characters
   - email: valid address, max 10000 characters
   - push: device token, max 256 characters
-- **Batches:** if one item is invalid, the whole batch is rejected. If a batch is sent again with the same idempotency keys, the response is `200` with the original `batch_id`.
+- **Batches:** if one item is invalid, the whole batch is rejected. Items whose idempotency key was already used are not created again; they are listed under `duplicates` with their own id and `batch_id`. If every key was used before, the response is `200` with the original `batch_id`.
 - **Scheduled notifications:** `scheduled_at` dispatches the job with a delay. They can be cancelled before they are sent.
 - **Metrics:** `GET /api/metrics` returns the queue size per priority, and per channel the counts by status, the success and failure rate, and the latency (avg, p95, max).
 - **Health:** `GET /api/health` checks the database and the queue.

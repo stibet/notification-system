@@ -23,16 +23,21 @@ class BatchController extends Controller
             $batchId = $batchIds->count() === 1 ? $batchIds->first() : null;
         }
 
+        $item = fn ($n) => [
+            'id' => $n->id,
+            'batch_id' => $n->batch_id,
+            'recipient' => $n->recipient,
+            'status' => $n->status,
+        ];
+
         return response()->json([
             'data' => [
                 'batch_id' => $batchId,
                 'created' => $created->count(),
-                'duplicates' => $existing->count(),
-                'notifications' => $created->concat($existing)->map(fn ($n) => [
-                    'id' => $n->id,
-                    'recipient' => $n->recipient,
-                    'status' => $n->status,
-                ]),
+                // created now, so they are the ones in batch_id
+                'notifications' => $created->map($item),
+                // created by an earlier request with the same key, each keeps its own batch
+                'duplicates' => $existing->map($item),
             ],
         ], $created->isEmpty() ? 200 : 202);
     }

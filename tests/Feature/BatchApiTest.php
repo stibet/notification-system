@@ -87,11 +87,32 @@ class BatchApiTest extends TestCase
             ->assertStatus(200)
             ->assertJsonPath('data.batch_id', $batchId)
             ->assertJsonPath('data.created', 0)
-            ->assertJsonPath('data.duplicates', 2)
-            ->assertJsonCount(2, 'data.notifications');
+            ->assertJsonCount(0, 'data.notifications')
+            ->assertJsonCount(2, 'data.duplicates')
+            ->assertJsonPath('data.duplicates.0.batch_id', $batchId);
 
         $this->assertSame(2, Notification::count());
         $this->getJson("/api/batches/{$batchId}")->assertOk()->assertJsonPath('data.total', 2);
+    }
+
+    public function test_a_batch_with_old_and_new_keys(): void
+    {
+        $old = $this->items(1);
+        $old[0]['idempotency_key'] = 'old';
+        $oldBatchId = $this->postJson('/api/batches', ['notifications' => $old])->json('data.batch_id');
+
+        $items = [...$old, [...$this->items(2)[1], 'idempotency_key' => 'new']];
+
+        $response = $this->postJson('/api/batches', ['notifications' => $items])
+            ->assertStatus(202)
+            ->assertJsonPath('data.created', 1)
+            ->assertJsonCount(1, 'data.notifications')
+            ->assertJsonCount(1, 'data.duplicates')
+            ->assertJsonPath('data.duplicates.0.batch_id', $oldBatchId);
+
+        $this->getJson('/api/batches/'.$response->json('data.batch_id'))
+            ->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.notifications.0.id', $response->json('data.notifications.0.id'));
     }
 
     public function test_zero_is_a_valid_idempotency_key(): void
@@ -102,7 +123,7 @@ class BatchApiTest extends TestCase
         $this->postJson('/api/batches', ['notifications' => $items])->assertStatus(202);
         $this->postJson('/api/batches', ['notifications' => $items])
             ->assertStatus(200)
-            ->assertJsonPath('data.duplicates', 1);
+            ->assertJsonCount(1, 'data.duplicates');
 
         $this->assertSame(1, Notification::count());
     }

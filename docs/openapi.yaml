@@ -194,16 +194,21 @@ components:
           properties:
             batch_id: { type: string, format: uuid, nullable: true }
             created: { type: integer }
-            duplicates: { type: integer, description: Items whose idempotency key was already used }
             notifications:
               type: array
-              description: Created notifications first, then the ones that already existed
-              items:
-                type: object
-                properties:
-                  id: { type: string, format: uuid }
-                  recipient: { type: string }
-                  status: { $ref: '#/components/schemas/Status' }
+              description: Notifications created by this request. These are the notifications of batch_id.
+              items: { $ref: '#/components/schemas/BatchItem' }
+            duplicates:
+              type: array
+              description: Items whose idempotency key was already used. They were not created again and keep their own batch_id.
+              items: { $ref: '#/components/schemas/BatchItem' }
+    BatchItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        batch_id: { type: string, format: uuid, nullable: true }
+        recipient: { type: string }
+        status: { $ref: '#/components/schemas/Status' }
     Channel: { type: string, enum: [sms, email, push] }
     Priority: { type: string, enum: [high, normal, low], default: normal }
     Status: { type: string, enum: [scheduled, queued, processing, retrying, sent, failed, cancelled] }
