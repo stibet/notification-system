@@ -1,9 +1,9 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "stibet/notification-system",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "description": "Notification service for SMS, email and push, built with Laravel.",
+    "keywords": ["laravel", "notifications", "queue"],
     "license": "MIT",
     "require": {
         "php": "^8.3",
