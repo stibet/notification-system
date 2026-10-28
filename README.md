@@ -1,58 +1,96 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Notification Service
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Notification service for SMS, email and push, written in Laravel 13. Requests are saved and queued, and workers send them to the provider in the background.
 
-## About Laravel
+PHP 8.4, Laravel 13, PostgreSQL, Redis, Docker Compose.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
-
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
-
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Setup
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+docker compose up
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+The API runs on http://localhost:8000 and the Swagger UI on http://localhost:8000/docs (spec: `docs/openapi.yaml`).
 
-## Contributing
+By default the worker sends to a small fake provider in the app (`/api/mock-provider`). To use webhook.site, create a URL there, set it to respond with status `202` and a body like `{"messageId": "...", "status": "accepted", "timestamp": "..."}`, then put the URL in `PROVIDER_URL` in `.env.docker`.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Tests:
 
-## Code of Conduct
+```bash
+docker compose run --rm app php artisan test
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Without Docker (uses SQLite and the database queue):
 
-## Security Vulnerabilities
+```bash
+cp .env.example .env
+php artisan key:generate
+php artisan migrate
+php artisan serve
+php artisan queue:work --queue=high,normal,low
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## How it works
 
-## License
+- `POST /api/notifications` validates the request, saves it with status `queued` and dispatches a `SendNotification` job. The response is `202`.
+- The priority is used as the queue name. Workers run with `--queue=high,normal,low`, so high priority jobs are processed first.
+- The job uses Laravel's `RateLimited` middleware with a limit of 100 per second per channel. The limiter uses the cache (Redis), so it works across workers.
+- The worker posts `{"to", "channel", "content"}` to the provider.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Delivery and retries:
+
+- 2xx: status `sent`. The provider's `messageId` and the latency are saved.
+- 5xx, 429 or a connection error: status `retrying`. The job is released and tried again after 10s, 30s, 90s and 270s.
+- Other 4xx: status `failed`, no retry.
+- After 5 failed attempts the status is `failed` and the last error is saved.
+
+To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the notification is picked up again after 2 minutes.
+
+Other details:
+
+- **Idempotency:** `idempotency_key` in the body or the `Idempotency-Key` header. If the key already exists, the existing notification is returned with `200`. The column has a unique index.
+- **Validation:** `channel`, `recipient` and `content` are required. Per channel:
+  - sms: phone number like `+905551234567`, max 160 characters
+  - email: valid address, max 10000 characters
+  - push: device token, max 256 characters
+- **Batches:** if one item is invalid, the whole batch is rejected.
+- **Scheduled notifications:** `scheduled_at` dispatches the job with a delay. They can be cancelled before they are sent.
+- **Metrics:** `GET /api/metrics` returns the queue size per priority, and per channel the counts by status, the success and failure rate, and the latency (avg, p95, max).
+- **Health:** `GET /api/health` checks the database and the queue.
+- **Logs:** JSON on stderr. Each request gets an `X-Correlation-ID` (generated if missing). It is returned in the response, stored on the notification, sent to the provider and included in the logs, including the worker logs.
+
+## Endpoints
+
+```bash
+# create
+curl -X POST localhost:8000/api/notifications -H "Content-Type: application/json" \
+  -d '{"channel":"sms","recipient":"+905551234567","content":"Your code is 1234","priority":"high"}'
+
+# batch, up to 1000
+curl -X POST localhost:8000/api/batches -H "Content-Type: application/json" \
+  -d '{"notifications":[{"channel":"sms","recipient":"+905551234567","content":"Hi"},{"channel":"email","recipient":"ada@example.com","content":"Hi"}]}'
+
+# status
+curl localhost:8000/api/notifications/{id}
+curl localhost:8000/api/batches/{batchId}
+
+# list
+curl "localhost:8000/api/notifications?status=sent&channel=sms&from=2026-10-01&to=2026-10-31&per_page=50"
+
+# cancel
+curl -X POST localhost:8000/api/notifications/{id}/cancel
+
+# scheduled
+curl -X POST localhost:8000/api/notifications -H "Content-Type: application/json" \
+  -d '{"channel":"push","recipient":"device-token-0123456789","content":"Sale starts now","scheduled_at":"2026-12-01T09:00:00Z"}'
+
+curl localhost:8000/api/metrics
+curl localhost:8000/api/health
+```
+
+## Possible improvements
+
+- **Outbox:** if Redis is down right after a notification is saved, its job is lost. An outbox table would fix this.
+- **Sliding window rate limit:** the current limit uses fixed one-second windows.
+- **Jitter:** add some randomness to the retry delays.
+- **Auth:** the API has no authentication.
