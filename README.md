@@ -12,7 +12,7 @@ docker compose up
 
 The API runs on http://localhost:8000 and the Swagger UI on http://localhost:8000/docs (spec: `docs/openapi.yaml`).
 
-By default the worker sends to a small fake provider in the app (`/api/mock-provider`). To use webhook.site, create a URL there, set it to respond with status `202` and a body like `{"messageId": "...", "status": "accepted", "timestamp": "..."}`, then put the URL in `PROVIDER_URL` in `.env.docker`.
+By default the worker sends to a small fake provider in the app (`/api/mock-provider`). To use webhook.site, create a URL there, set it to respond with status `202` and a body like `{"messageId": "...", "status": "accepted", "timestamp": "..."}`, then put the URL in `PROVIDER_URL` in `.env.docker`. The fake provider is the default because free webhook.site URLs are deleted after 7 days and accept only 100 requests.
 
 Tests:
 
@@ -28,13 +28,14 @@ php artisan key:generate
 php artisan migrate
 php artisan serve
 php artisan queue:work --queue=high,normal,low
+php artisan schedule:work
 ```
 
 ## How it works
 
 - `POST /api/notifications` validates the request, saves it with status `queued` and dispatches a `SendNotification` job. The response is `202`.
 - The priority is used as the queue name. Workers run with `--queue=high,normal,low`, so high priority jobs are processed first.
-- The job uses Laravel's `RateLimited` middleware with a limit of 100 per second per channel. The limiter uses the cache (Redis), so it works across workers.
+- The job allows 100 sends per second per channel. Before sending it increments a counter in Redis (`INCR`, atomic) and checks it after, so workers running at the same time can't go over the limit together. Jobs over the limit go back to the queue for a second.
 - The worker posts `{"to", "channel", "content"}` to the provider.
 
 Delivery and retries:
@@ -44,7 +45,9 @@ Delivery and retries:
 - Other 4xx: status `failed`, no retry.
 - After 5 failed attempts the status is `failed` and the last error is saved.
 
-To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the notification is picked up again after 2 minutes.
+To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the queue gives the job back after 90 seconds (`retry_after`). The job times out after 30 seconds, so a row that has been in `processing` for more than a minute is taken again.
+
+The notification is saved before its job is put on the queue. If Redis is down at that moment the API still answers `202`, and the row keeps `dispatched_at` empty. The scheduler runs `notifications:dispatch` every minute and queues these rows (a simple outbox).
 
 Other details:
 
@@ -53,7 +56,7 @@ Other details:
   - sms: phone number like `+905551234567`, max 160 characters
   - email: valid address, max 10000 characters
   - push: device token, max 256 characters
-- **Batches:** if one item is invalid, the whole batch is rejected.
+- **Batches:** if one item is invalid, the whole batch is rejected. If a batch is sent again with the same idempotency keys, the response is `200` with the original `batch_id`.
 - **Scheduled notifications:** `scheduled_at` dispatches the job with a delay. They can be cancelled before they are sent.
 - **Metrics:** `GET /api/metrics` returns the queue size per priority, and per channel the counts by status, the success and failure rate, and the latency (avg, p95, max).
 - **Health:** `GET /api/health` checks the database and the queue.
@@ -90,7 +93,7 @@ curl localhost:8000/api/health
 
 ## Possible improvements
 
-- **Outbox:** if Redis is down right after a notification is saved, its job is lost. An outbox table would fix this.
+- **Redis persistence:** delayed jobs (retries, scheduled notifications) live in Redis. Turning on AOF would keep them after a Redis restart.
 - **Sliding window rate limit:** the current limit uses fixed one-second windows.
 - **Jitter:** add some randomness to the retry delays.
 - **Auth:** the API has no authentication.
