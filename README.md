@@ -23,6 +23,7 @@ docker compose run --rm app php artisan test
 Without Docker (uses SQLite and the database queue):
 
 ```bash
+composer install
 cp .env.example .env
 php artisan key:generate
 php artisan migrate
@@ -48,6 +49,8 @@ Delivery and retries:
 To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the queue gives the job back after 90 seconds (`retry_after`). The job times out after 30 seconds, so a row that has been in `processing` for more than a minute is taken again.
 
 The notification is saved before its job is put on the queue. If Redis is down at that moment the API still answers `202`, and the row keeps `dispatched_at` empty. The scheduler runs `notifications:dispatch` every minute and queues these rows (a simple outbox).
+
+Redis runs with AOF on a volume, so queued and delayed jobs (retries, scheduled notifications) are kept when Redis restarts. Workers and the scheduler start after the API is healthy, i.e. after the migrations.
 
 Other details:
 
@@ -93,7 +96,6 @@ curl localhost:8000/api/health
 
 ## Possible improvements
 
-- **Redis persistence:** delayed jobs (retries, scheduled notifications) live in Redis. Turning on AOF would keep them after a Redis restart.
 - **Sliding window rate limit:** the current limit uses fixed one-second windows.
 - **Jitter:** add some randomness to the retry delays.
 - **Auth:** the API has no authentication.
