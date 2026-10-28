@@ -7,11 +7,11 @@ use App\Models\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 class SendNotification implements ShouldQueue
@@ -30,16 +30,11 @@ class SendNotification implements ShouldQueue
         public string $channel,
     ) {}
 
-    public function middleware(): array
-    {
-        return [new RateLimited('notifications')];
-    }
-
     public function handle(): void
     {
         Context::add('notification_id', $this->notificationId);
 
-        if (! $this->claim()) {
+        if ($this->overRateLimit() || ! $this->claim()) {
             return;
         }
 
@@ -79,14 +74,30 @@ class SendNotification implements ShouldQueue
             ->update(['status' => NotificationStatus::Failed, 'last_error' => $exception?->getMessage()]);
     }
 
+    // The counter is increased before it is checked (INCR in Redis), so workers
+    // running at the same time can't go over the limit together.
+    private function overRateLimit(): bool
+    {
+        $key = 'notifications:'.$this->channel;
+
+        if (RateLimiter::hit($key, 1) <= config('notifications.rate_limit_per_second')) {
+            return false;
+        }
+
+        $this->release(max(1, RateLimiter::availableIn($key)));
+
+        return true;
+    }
+
     // Only one worker can move the row to "processing", so it is never sent twice.
-    // Rows stuck in "processing" (worker crashed) are taken again after 2 minutes.
+    // If a worker crashes, the queue gives the job back after 90 seconds (retry_after).
+    // The job times out after 30 seconds, so a row in "processing" for a minute is taken again.
     private function claim(): bool
     {
         $updated = Notification::whereKey($this->notificationId)
             ->where(function ($query) {
                 $query->whereIn('status', ['scheduled', 'queued', 'retrying'])
-                    ->orWhere(fn ($q) => $q->where('status', 'processing')->where('updated_at', '<', now()->subMinutes(2)));
+                    ->orWhere(fn ($q) => $q->where('status', 'processing')->where('updated_at', '<', now()->subMinute()));
             })
             ->update([
                 'status' => NotificationStatus::Processing,

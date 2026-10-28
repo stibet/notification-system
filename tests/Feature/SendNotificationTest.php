@@ -8,7 +8,6 @@ use App\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
-use Illuminate\Queue\Middleware\RateLimited;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -157,7 +156,7 @@ class SendNotificationTest extends TestCase
     {
         $this->providerAccepts();
         $notification = Notification::factory()->create(['status' => NotificationStatus::Processing]);
-        $this->travel(3)->minutes();
+        $this->travel(90)->seconds();
 
         $this->runJob($notification);
 
@@ -179,25 +178,15 @@ class SendNotificationTest extends TestCase
 
     public function test_the_rate_limit_is_per_channel(): void
     {
+        $this->providerAccepts();
         config(['notifications.rate_limit_per_second' => 2]);
-        $middleware = new RateLimited('notifications');
-        $passed = 0;
 
-        $run = function (string $channel) use ($middleware, &$passed) {
-            $job = (new SendNotification('id', $channel))->withFakeQueueInteractions();
-            $middleware->handle($job, function () use (&$passed) {
-                $passed++;
-            });
+        $this->runJob(Notification::factory()->create())->assertNotReleased();
+        $this->runJob(Notification::factory()->create())->assertNotReleased();
+        $this->runJob(Notification::factory()->create())->assertReleased(1);
+        $this->runJob(Notification::factory()->create(['channel' => 'email', 'recipient' => 'ada@example.com']))->assertNotReleased();
 
-            return $job;
-        };
-
-        $run('sms');
-        $run('sms');
-        $run('sms')->assertReleased();
-        $run('email');
-
-        $this->assertSame(3, $passed);
+        Http::assertSentCount(3);
     }
 
     public function test_the_failed_hook_marks_the_notification_as_failed(): void
