@@ -75,6 +75,17 @@ class NotificationApiTest extends TestCase
             ->assertJsonValidationErrors(['priority']);
     }
 
+    public function test_wrong_types_are_a_validation_error(): void
+    {
+        $this->postJson('/api/notifications', ['channel' => ['sms'], 'recipient' => ['x'], 'content' => ['x']])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['channel', 'recipient', 'content']);
+
+        $this->postJson('/api/batches', ['notifications' => [['channel' => ['sms'], 'recipient' => '+905551234567', 'content' => 'Hi']]])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['notifications.0.channel']);
+    }
+
     public function test_sms_limit_counts_characters_not_bytes(): void
     {
         $this->postJson('/api/notifications', ['content' => str_repeat('ğ', 160)] + $this->sms)->assertStatus(202);

@@ -23,11 +23,18 @@ trait ValidatesNotifications
 
     protected function checkChannelRules(Validator $validator, array $item, string $prefix = ''): void
     {
-        $channel = Channel::tryFrom((string) ($item['channel'] ?? ''));
+        $channel = $item['channel'] ?? null;
         $recipient = $item['recipient'] ?? null;
         $content = $item['content'] ?? null;
 
-        if (! $channel || ! is_string($recipient) || ! is_string($content)) {
+        // wrong types are already reported by the rules above
+        if (! is_string($channel) || ! is_string($recipient) || ! is_string($content)) {
+            return;
+        }
+
+        $channel = Channel::tryFrom($channel);
+
+        if (! $channel) {
             return;
         }
 
