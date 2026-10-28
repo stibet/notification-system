@@ -94,6 +94,19 @@ class BatchApiTest extends TestCase
         $this->getJson("/api/batches/{$batchId}")->assertOk()->assertJsonPath('data.total', 2);
     }
 
+    public function test_zero_is_a_valid_idempotency_key(): void
+    {
+        $items = $this->items(1);
+        $items[0]['idempotency_key'] = '0';
+
+        $this->postJson('/api/batches', ['notifications' => $items])->assertStatus(202);
+        $this->postJson('/api/batches', ['notifications' => $items])
+            ->assertStatus(200)
+            ->assertJsonPath('data.duplicates', 1);
+
+        $this->assertSame(1, Notification::count());
+    }
+
     public function test_idempotency_keys_must_be_unique_inside_a_batch(): void
     {
         $items = $this->items(2);

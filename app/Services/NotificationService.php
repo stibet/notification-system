@@ -17,7 +17,7 @@ class NotificationService
     // Returns [created, existing]. Items with an already used idempotency key are skipped.
     public function create(array $items, ?string $batchId = null): array
     {
-        $keys = array_filter(array_column($items, 'idempotency_key'));
+        $keys = array_filter(array_column($items, 'idempotency_key'), fn ($key) => $key !== null);
         $existing = Notification::whereIn('idempotency_key', $keys)->get();
         $usedKeys = $existing->pluck('idempotency_key')->flip();
 
@@ -27,7 +27,7 @@ class NotificationService
             foreach ($items as $item) {
                 $key = $item['idempotency_key'] ?? null;
 
-                if ($key && $usedKeys->has($key)) {
+                if ($key !== null && $usedKeys->has($key)) {
                     continue;
                 }
 
