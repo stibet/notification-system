@@ -36,6 +36,21 @@ jobs:
             sleep 1
           done
           exit 1
+      - name: Three workers with a duplicate job for every notification
+        run: |
+          jq -n '{notifications: [range(300) | {channel: "sms", recipient: "+90555\(1000000 + .)", content: "Batch \(.)"}]}' > batch.json
+          batch=$(curl --fail -s -X POST localhost:8000/api/batches -H "Content-Type: application/json" -d @batch.json | jq -r .data.batch_id)
+          docker compose exec -T app php artisan tinker --execute="App\Models\Notification::where('batch_id', '$batch')->each(fn (\$n) => App\Jobs\SendNotification::dispatch(\$n->id, 'sms')->onQueue('normal'));"
+          for i in $(seq 1 60); do
+            sent=$(curl -s localhost:8000/api/batches/$batch | jq '.data.status_counts.sent // 0')
+            echo "sent: $sent"
+            if [ "$sent" = 300 ]; then break; fi
+            sleep 1
+          done
+          sleep 2
+          # each notification must reach the provider once
+          docker compose logs worker | grep '"Notification sent"' | grep -o '"notification_id":"[^"]*"' | sort | uniq -d > sent-twice.txt
+          [ "$sent" = 300 ] && [ ! -s sent-twice.txt ]
       - name: Tests
         run: docker compose run --rm app php artisan test
       - name: Logs
