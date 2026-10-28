@@ -110,23 +110,12 @@ paths:
           description: Saved and queued
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      batch_id: { type: string, format: uuid }
-                      created: { type: integer }
-                      duplicates: { type: integer, description: Items whose idempotency key was already used }
-                      notifications:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id: { type: string, format: uuid }
-                            recipient: { type: string }
-                            status: { $ref: '#/components/schemas/Status' }
+              schema: { $ref: '#/components/schemas/BatchCreated' }
+        '200':
+          description: Every idempotency key was already used. Returns the original batch id and notifications.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchCreated' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/batches/{id}:
@@ -197,6 +186,24 @@ components:
               recipient: [The recipient must be a phone number like +905551234567.]
 
   schemas:
+    BatchCreated:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            batch_id: { type: string, format: uuid, nullable: true }
+            created: { type: integer }
+            duplicates: { type: integer, description: Items whose idempotency key was already used }
+            notifications:
+              type: array
+              description: Created notifications first, then the ones that already existed
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  recipient: { type: string }
+                  status: { $ref: '#/components/schemas/Status' }
     Channel: { type: string, enum: [sms, email, push] }
     Priority: { type: string, enum: [high, normal, low], default: normal }
     Status: { type: string, enum: [scheduled, queued, processing, retrying, sent, failed, cancelled] }

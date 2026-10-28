@@ -79,12 +79,19 @@ class BatchApiTest extends TestCase
         $items[0]['idempotency_key'] = 'a';
         $items[1]['idempotency_key'] = 'b';
 
-        $this->postJson('/api/batches', ['notifications' => $items])->assertJsonPath('data.created', 2);
+        $batchId = $this->postJson('/api/batches', ['notifications' => $items])
+            ->assertJsonPath('data.created', 2)
+            ->json('data.batch_id');
+
         $this->postJson('/api/batches', ['notifications' => $items])
+            ->assertStatus(200)
+            ->assertJsonPath('data.batch_id', $batchId)
             ->assertJsonPath('data.created', 0)
-            ->assertJsonPath('data.duplicates', 2);
+            ->assertJsonPath('data.duplicates', 2)
+            ->assertJsonCount(2, 'data.notifications');
 
         $this->assertSame(2, Notification::count());
+        $this->getJson("/api/batches/{$batchId}")->assertOk()->assertJsonPath('data.total', 2);
     }
 
     public function test_idempotency_keys_must_be_unique_inside_a_batch(): void

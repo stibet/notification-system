@@ -17,18 +17,24 @@ class BatchController extends Controller
 
         [$created, $existing] = $this->service->create($request->validated('notifications'), $batchId);
 
+        // the same batch was sent again: return the original batch id
+        if ($created->isEmpty()) {
+            $batchIds = $existing->pluck('batch_id')->unique();
+            $batchId = $batchIds->count() === 1 ? $batchIds->first() : null;
+        }
+
         return response()->json([
             'data' => [
                 'batch_id' => $batchId,
                 'created' => $created->count(),
                 'duplicates' => $existing->count(),
-                'notifications' => $created->map(fn ($n) => [
+                'notifications' => $created->concat($existing)->map(fn ($n) => [
                     'id' => $n->id,
                     'recipient' => $n->recipient,
                     'status' => $n->status,
                 ]),
             ],
-        ], 202);
+        ], $created->isEmpty() ? 200 : 202);
     }
 
     public function show(string $batchId)
