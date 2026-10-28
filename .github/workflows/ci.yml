@@ -21,4 +21,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose build
+      - name: Start
+        run: docker compose up -d --build
+      - name: Health check
+        run: curl --fail --retry 30 --retry-delay 2 --retry-all-errors localhost:8000/api/health
+      - name: Send a notification
+        run: |
+          id=$(curl --fail -s -X POST localhost:8000/api/notifications -H "Content-Type: application/json" \
+            -d '{"channel":"sms","recipient":"+905551234567","content":"Hello from CI"}' | jq -r .data.id)
+          for i in $(seq 1 30); do
+            status=$(curl -s localhost:8000/api/notifications/$id | jq -r .data.status)
+            echo "$status"
+            if [ "$status" = sent ]; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Tests
+        run: docker compose run --rm app php artisan test
+      - name: Logs
+        if: failure()
+        run: docker compose logs
