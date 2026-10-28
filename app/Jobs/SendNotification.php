@@ -34,7 +34,16 @@ class SendNotification implements ShouldQueue
     {
         Context::add('notification_id', $this->notificationId);
 
-        if ($this->overRateLimit() || ! $this->claim()) {
+        if ($this->overRateLimit()) {
+            return;
+        }
+
+        if (! $this->claim()) {
+            // another worker is sending it, or failed while sending: check again later
+            if (Notification::whereKey($this->notificationId)->where('status', 'processing')->exists()) {
+                $this->release(60);
+            }
+
             return;
         }
 

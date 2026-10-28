@@ -147,9 +147,23 @@ class SendNotificationTest extends TestCase
         Http::fake();
         $notification = Notification::factory()->create(['status' => NotificationStatus::Processing]);
 
-        $this->runJob($notification);
+        $this->runJob($notification)->assertReleased(60);
 
         Http::assertNothingSent();
+    }
+
+    public function test_a_job_that_failed_after_claiming_sends_on_the_next_try(): void
+    {
+        $this->providerAccepts();
+        // the job threw after taking the row, so the row stays in "processing"
+        $notification = Notification::factory()->create(['status' => NotificationStatus::Processing]);
+
+        $this->runJob($notification)->assertReleased(60);
+
+        $this->travel(61)->seconds();
+        $this->runJob($notification)->assertNotReleased();
+
+        $this->assertSame(NotificationStatus::Sent, $notification->refresh()->status);
     }
 
     public function test_a_notification_stuck_in_processing_is_picked_up_again(): void

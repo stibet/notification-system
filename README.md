@@ -46,7 +46,7 @@ Delivery and retries:
 - Other 4xx: status `failed`, no retry.
 - After 5 failed attempts the status is `failed` and the last error is saved.
 
-To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the queue gives the job back after 90 seconds (`retry_after`). The job times out after 30 seconds, so a row that has been in `processing` for more than a minute is taken again.
+To avoid sending the same notification twice, the job first moves it to `processing` with a conditional update (`WHERE status IN ('scheduled', 'queued', 'retrying')`). If the same job runs twice, only one of them gets the row. If a worker dies while sending, the queue gives the job back after 90 seconds (`retry_after`). The job times out after 30 seconds, so a row that has been in `processing` for more than a minute is taken again. A job that finds its row in `processing` goes back to the queue and checks again a minute later, so a row is never left there.
 
 The notification is saved before its job is put on the queue. If Redis is down at that moment the API still answers `202`, and the row keeps `dispatched_at` empty. The scheduler runs `notifications:dispatch` every minute and queues these rows (a simple outbox).
 
