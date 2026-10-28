@@ -49,8 +49,9 @@ jobs:
           done
           sleep 2
           # each notification must reach the provider once
-          docker compose logs worker | grep '"Notification sent"' | grep -o '"notification_id":"[^"]*"' | sort | uniq -d > sent-twice.txt
-          [ "$sent" = 300 ] && [ ! -s sent-twice.txt ]
+          docker compose logs worker | grep '"Notification sent"' | grep -o '"notification_id":"[^"]*"' | sort > sent.txt
+          echo "sent log lines: $(wc -l < sent.txt), sent twice: $(uniq -d sent.txt | wc -l)"
+          [ "$sent" = 300 ] && [ "$(uniq sent.txt | wc -l)" -ge 300 ] && [ -z "$(uniq -d sent.txt)" ]
       - name: Tests
         run: docker compose run --rm app php artisan test
       - name: Logs
