@@ -26,13 +26,30 @@ Without Docker (uses SQLite and the database queue):
 composer install
 cp .env.example .env
 php artisan key:generate
-php artisan migrate
+php artisan migrate --force
+```
+
+Then run these in separate terminals:
+
+```bash
 php artisan serve
 php artisan queue:work --queue=high,normal,low
 php artisan schedule:work
 ```
 
-## How it works
+## Architecture
+
+```
+client --> API --> PostgreSQL (notifications)
+            |
+            v
+      Redis queues (high, normal, low) --> workers (3) --> provider
+            ^
+            |
+scheduler (notifications:dispatch, every minute)
+```
+
+The API only saves the request and queues a job, so it stays fast during bursts. Workers do the sending in the background. Redis also holds the rate limit counters.
 
 - `POST /api/notifications` validates the request, saves it with status `queued` and dispatches a `SendNotification` job. The response is `202`.
 - The priority is used as the queue name. Workers run with `--queue=high,normal,low`, so high priority jobs are processed first.
